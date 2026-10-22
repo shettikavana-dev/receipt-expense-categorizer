@@ -54,17 +54,40 @@ def extract_fields(text):
                 break
             except ValueError:
                 pass
-    amounts = []
-    for match in re.finditer(r"(?:₹|INR|Rs\.?|TOTAL|AMOUNT|GRAND TOTAL)?\s*([0-9]{1,7}(?:,[0-9]{3})*(?:\.[0-9]{1,2})?)", text, re.I):
-        raw = match.group(1).replace(",", "")
-        try:
-            value = float(raw)
-            if value > 0:
-                amounts.append(value)
-        except ValueError:
-            pass
-    # Usually the total is the largest amount on a receipt; confirm it in the form.
-    amount = max(amounts) if amounts else 0.0
+    # Extract the total amount using its label
+    total_match = re.search(
+        r"total\s*amount\s*[:=]?\s*₹?\s*([0-9,]+(?:\.[0-9]{1,2})?)",
+        text,
+        re.IGNORECASE
+    )
+
+    if total_match:
+        amount = float(total_match.group(1).replace(",", ""))
+    else:
+        # Fallback: calculate total from subtotal and GST
+        subtotal_match = re.search(
+            r"(?:sub\s*total|subtotal)\s*[:=]?\s*₹?\s*([0-9,]+(?:\.[0-9]{1,2})?)",
+            text,
+            re.IGNORECASE
+        )
+        cgst_match = re.search(
+            r"CGST\s*\([^)]*\)\s*[:=]?\s*₹?\s*([0-9,]+(?:\.[0-9]{1,2})?)",
+            text,
+            re.IGNORECASE
+        )
+        sgst_match = re.search(
+            r"SGST\s*\([^)]*\)\s*[:=]?\s*₹?\s*([0-9,]+(?:\.[0-9]{1,2})?)",
+            text,
+            re.IGNORECASE
+        )
+
+        if subtotal_match and cgst_match and sgst_match:
+            subtotal = float(subtotal_match.group(1).replace(",", ""))
+            cgst = float(cgst_match.group(1).replace(",", ""))
+            sgst = float(sgst_match.group(1).replace(",", ""))
+            amount = round(subtotal + cgst + sgst, 2)
+        else:
+            amount = 0.0
     tax_match = re.search(r"(?:tax|gst|vat)\D{0,12}([0-9]+(?:\.[0-9]{1,2})?)", text, re.I)
     tax = float(tax_match.group(1)) if tax_match else 0.0
     return {"vendor": vendor, "date": date_value, "amount": amount, "tax": tax}
